@@ -10,11 +10,11 @@ The *official* repository for  [Dynamic Feature Pruning and Consolidation for Oc
 
 ## Pipeline
 
-![framework](figs/pipeline.png)
+![framework](figs/pipeline.PNG)
 
 ## Visualization of the Patch Pruning Process
 
-![framework](figs/vis-patch-drop-layer.png)
+![framework](figs/vis-patch-drop-layer.PNG)
 
 
 
@@ -22,8 +22,8 @@ The *official* repository for  [Dynamic Feature Pruning and Consolidation for Oc
 
 Occluded dataset
 
-![framework](figs/occluded.png)
+![framework](figs/occluded.PNG)
 
 Global dataset
 
-![framework](figs/global.png)
+![framework](figs/global.PNG)
