@@ -7,6 +7,7 @@ The *official* repository for  [Dynamic Feature Pruning and Consolidation for Oc
 
 ## News
 - 2023.3  FPC's code will be released coming soon.
+- 2023.11We first updated part of the evaluation code, and we will continue updating. 
 
 ## Pipeline
 
