@@ -1,0 +1,143 @@
+2023-12-20 15:50:00,060 fpc INFO: Saving model in the path :./logs/occ_duke
+2023-12-20 15:50:00,061 fpc INFO: Namespace(config_file='configs/OCC_Duke/vit_transreid_stride.yml', local_rank=0, opts=['MODEL.DEVICE_ID', "('0')"])
+2023-12-20 15:50:00,061 fpc INFO: Loaded configuration file configs/OCC_Duke/vit_transreid_stride.yml
+2023-12-20 15:50:00,061 fpc INFO: 
+MODEL:
+  PRETRAIN_CHOICE: 'imagenet'
+  METRIC_LOSS_TYPE: 'triplet'
+  IF_LABELSMOOTH: 'off'
+  IF_WITH_CENTER: 'no'
+  NAME: 'transformer'
+  NO_MARGIN: True
+  DEVICE_ID: ('3')
+  TRANSFORMER_TYPE: 'vit_base_patch16_224_TransReID'
+  STRIDE_SIZE: [11, 11]
+  SIE_CAMERA: True
+  SIE_COE: 3.0
+  REC: True
+  RE_ARRANGE: True
+
+INPUT:
+  SIZE_TRAIN: [256, 128]
+  SIZE_TEST: [256, 128]
+  PROB: 0.5 # random horizontal flip
+  RE_PROB: 0.5 # random erasing
+  PADDING: 10
+  PIXEL_MEAN: [0.5, 0.5, 0.5]
+  PIXEL_STD: [0.5, 0.5, 0.5]
+
+DATASETS:
+  NAMES: ('occ_duke')
+  ROOT_DIR: ('./data')
+
+DATALOADER:
+  SAMPLER: 'softmax_triplet'
+  NUM_INSTANCE: 4
+  NUM_WORKERS: 8
+
+SOLVER:
+  OPTIMIZER_NAME: 'SGD'
+  MAX_EPOCHS: 120
+  BASE_LR: 0.008
+  IMS_PER_BATCH: 4
+  WARMUP_METHOD: 'linear'
+  LARGE_FC_LR: False
+  CHECKPOINT_PERIOD: 10
+  LOG_PERIOD: 50
+  EVAL_PERIOD: 120
+  WEIGHT_DECAY:  1e-4
+  WEIGHT_DECAY_BIAS: 1e-4
+  BIAS_LR_FACTOR: 2
+
+TEST:
+  EVAL: True
+  IMS_PER_BATCH: 16
+  RE_RANKING: False
+  WEIGHT: ''
+  NECK_FEAT: 'after'
+  FEAT_NORM: 'yes'
+
+OUTPUT_DIR: './logs/occ_duke'
+
+
+
+2023-12-20 15:50:00,061 fpc INFO: Running with config:
+DATALOADER:
+  NUM_INSTANCE: 4
+  NUM_WORKERS: 8
+  SAMPLER: softmax_triplet
+DATASETS:
+  NAMES: occ_duke
+  ROOT_DIR: ./data
+INPUT:
+  PADDING: 10
+  PIXEL_MEAN: [0.5, 0.5, 0.5]
+  PIXEL_STD: [0.5, 0.5, 0.5]
+  PROB: 0.5
+  RE_PROB: 0.5
+  SIZE_TEST: [256, 128]
+  SIZE_TRAIN: [256, 128]
+MODEL:
+  ATT_DROP_RATE: 0.0
+  COS_LAYER: False
+  DEVICE: cuda
+  DEVICE_ID: 0
+  DEVIDE_LENGTH: 4
+  DIST_TRAIN: False
+  DROP_OUT: 0.0
+  DROP_PATH: 0.1
+  ID_LOSS_TYPE: softmax
+  ID_LOSS_WEIGHT: 1.0
+  IF_LABELSMOOTH: off
+  IF_WITH_CENTER: no
+  LAST_STRIDE: 1
+  METRIC_LOSS_TYPE: triplet
+  NAME: transformer
+  NECK: bnneck
+  NO_MARGIN: True
+  PRETRAIN_CHOICE: imagenet
+  PRETRAIN_PATH: 
+  REC: True
+  RE_ARRANGE: True
+  SHIFT_NUM: 5
+  SHUFFLE_GROUP: 2
+  SIE_CAMERA: True
+  SIE_COE: 3.0
+  SIE_VIEW: False
+  STRIDE_SIZE: [11, 11]
+  TRANSFORMER_TYPE: vit_base_patch16_224_TransReID
+  TRIPLET_LOSS_WEIGHT: 1.0
+OUTPUT_DIR: ./logs/occ_duke
+SOLVER:
+  BASE_LR: 0.008
+  BIAS_LR_FACTOR: 2
+  CENTER_LOSS_WEIGHT: 0.0005
+  CENTER_LR: 0.5
+  CHECKPOINT_PERIOD: 10
+  COSINE_MARGIN: 0.5
+  COSINE_SCALE: 30
+  EVAL_PERIOD: 120
+  GAMMA: 0.1
+  IMS_PER_BATCH: 4
+  LARGE_FC_LR: False
+  LOG_PERIOD: 50
+  MARGIN: 0.3
+  MAX_EPOCHS: 120
+  MOMENTUM: 0.9
+  OPTIMIZER_NAME: SGD
+  SEED: 1234
+  STEPS: (40, 70)
+  WARMUP_EPOCHS: 5
+  WARMUP_FACTOR: 0.01
+  WARMUP_METHOD: linear
+  WEIGHT_DECAY: 0.0001
+  WEIGHT_DECAY_BIAS: 0.0001
+TEST:
+  DIST_MAT: dist_mat.npy
+  EVAL: True
+  FEAT_NORM: yes
+  IMS_PER_BATCH: 16
+  NECK_FEAT: after
+  RE_RANKING: False
+  WEIGHT: 
+2023-12-20 15:51:36,081 fpc.train INFO: start training

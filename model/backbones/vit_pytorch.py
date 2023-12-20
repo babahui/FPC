@@ -166,23 +166,9 @@ class Mlp(nn.Module):
         x = self.drop(x)
         return x
 
-# class Attention & class Block, update in 11-20
+
 class Attention(nn.Module):
-    """
-    Attention mechanism for the Transformer model.
-    """
     def __init__(self, dim, num_heads=8, qkv_bias=False, qk_scale=None, attn_drop=0., proj_drop=0., keep_rate=1.):
-        """
-        Initializes the Attention module.
-        Args:
-            dim: Dimension of the input features.
-            num_heads: Number of attention heads.
-            qkv_bias: Boolean to use bias in qkv Linear layers.
-            qk_scale: Scaling factor for qkv.
-            attn_drop: Dropout rate for attention.
-            proj_drop: Dropout rate for projection.
-            keep_rate: Rate of tokens to keep.
-        """
         super().__init__()
         self.num_heads = num_heads
         head_dim = dim // num_heads
@@ -192,23 +178,14 @@ class Attention(nn.Module):
         self.attn_drop = nn.Dropout(attn_drop)
         self.proj = nn.Linear(dim, dim)
         self.proj_drop = nn.Dropout(proj_drop)
-        
+
         self.keep_rate = keep_rate
         assert 0 < keep_rate <= 1, f"keep_rate must be > 0 and <= 1, got {keep_rate}"
 
     def forward(self, x, keep_rate=None, tokens=None):
-        """
-        Forward pass of the Attention module.
-        Args:
-            x: Input tensor.
-            keep_rate: Rate of tokens to keep.
-            tokens: Specific tokens to keep.
-        Returns:
-            Output tensor and additional information depending on the input parameters.
-        """
         B, N, C = x.shape
         qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
-        q, k, v = qkv[0], qkv[1], qkv[2]
+        q, k, v = qkv.unbind(0)  # Split into separate tensors
 
         attn = (q @ k.transpose(-2, -1)) * self.scale
         attn = attn.softmax(dim=-1)
@@ -217,48 +194,30 @@ class Attention(nn.Module):
         x = (attn @ v).transpose(1, 2).reshape(B, N, C)
         x = self.proj(x)
         x = self.proj_drop(x)
-        
-        left_tokens = N - 1
+
         if keep_rate < 1 or tokens is not None:
-            left_tokens = math.ceil(keep_rate * (N - 1))
-            left_tokens = tokens if tokens is not None else left_tokens
+            left_tokens = math.ceil(keep_rate * (N - 1)) if tokens is None else tokens
             assert left_tokens >= 1
 
             cls_attn = attn[:, :, 0, 1:].mean(dim=1)
             _, idx = torch.topk(cls_attn, left_tokens, dim=1, largest=True, sorted=True)
-            index = idx.unsqueeze(-1).expand(-1, -1, C)
 
+            index = idx.unsqueeze(-1).expand(-1, -1, C)
             return x, index, idx, cls_attn, left_tokens
 
-        return x, None, None, None, left_tokens
-    
+        return x, None, None, None, N - 1
 
+
+    
 class Block(nn.Module):
-    """
-    Block module in a Transformer model.
-    """
+
     def __init__(self, dim, num_heads, mlp_ratio=4., qkv_bias=False, qk_scale=None, drop=0., attn_drop=0.,
                  drop_path=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm, keep_rate=1., fuse_token=False, jpm_layer=False):
-        """
-        Initializes the Block module.
-        Args:
-            dim: Dimension of the input features.
-            num_heads: Number of attention heads.
-            mlp_ratio: Ratio for MLP dimension.
-            qkv_bias: Boolean to use bias in qkv Linear layers.
-            qk_scale: Scaling factor for qkv.
-            drop: Dropout rate.
-            attn_drop: Dropout rate for attention.
-            drop_path: Drop path rate.
-            act_layer: Activation layer.
-            norm_layer: Normalization layer.
-            keep_rate: Rate of tokens to keep.
-            fuse_token: Boolean to fuse tokens.
-            jpm_layer: Boolean to use JPM layer.
-        """
         super().__init__()
         self.norm1 = norm_layer(dim)
-        self.attn = Attention(dim, num_heads=num_heads, qkv_bias=qkv_bias, qk_scale=qk_scale, attn_drop=attn_drop, proj_drop=drop, keep_rate=keep_rate)
+        self.attn = Attention(
+            dim, num_heads=num_heads, qkv_bias=qkv_bias, qk_scale=qk_scale, attn_drop=attn_drop, proj_drop=drop, keep_rate=keep_rate)
+        # NOTE: drop path for stochastic depth, we shall see if this is better than dropout here
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
         self.norm2 = norm_layer(dim)
         mlp_hidden_dim = int(dim * mlp_ratio)
@@ -269,32 +228,28 @@ class Block(nn.Module):
         self.jpm_layer = jpm_layer
 
     def forward(self, x, keep_rate=None, tokens=None, get_idx=False):
-        """
-        Forward pass of the Block module.
-        Args:
-            x: Input tensor.
-            keep_rate: Rate of tokens to keep.
-            tokens: Specific tokens to keep.
-            get_idx: Boolean to get indices of kept tokens.
-        Returns:
-            Output tensor and additional information depending on the input parameters.
-        """
+        # x = x + self.drop_path(self.attn(self.norm1(x)))
+        # x = x + self.drop_path(self.mlp(self.norm2(x)))
+        # return x
+        
         if keep_rate is None:
-            keep_rate = self.keep_rate
-
+            keep_rate = self.keep_rate  # this is for inference, use the default keep rate
         B, N, C = x.shape
+
         tmp, index, idx, cls_attn, left_tokens = self.attn(self.norm1(x), keep_rate, tokens)        
         x = x + self.drop_path(tmp)
 
         if index is not None:
+            # B, N, C = x.shape
             non_cls = x[:, 1:]
-            x_others = torch.gather(non_cls, dim=1, index=index)
+            x_others = torch.gather(non_cls, dim=1, index=index)  # [B, left_tokens, C]
 
             if self.fuse_token:
-                compl = complement_idx(idx, N - 1)
-                non_topk = torch.gather(non_cls, dim=1, index=compl.unsqueeze(-1).expand(-1, -1, C))
-                non_topk_attn = torch.gather(cls_attn, dim=1, index=compl)
-                extra_token = torch.sum(non_topk * non_topk_attn.unsqueeze(-1), dim=1, keepdim=True)
+                compl = complement_idx(idx, N - 1)  # [B, N-1-left_tokens]
+                non_topk = torch.gather(non_cls, dim=1, index=compl.unsqueeze(-1).expand(-1, -1, C))  # [B, N-1-left_tokens, C]
+
+                non_topk_attn = torch.gather(cls_attn, dim=1, index=compl)  # [B, N-1-left_tokens]
+                extra_token = torch.sum(non_topk * non_topk_attn.unsqueeze(-1), dim=1, keepdim=True)  # [B, 1, C]
                 x = torch.cat([x[:, 0:1], x_others, extra_token], dim=1)
             else:
                 x = torch.cat([x[:, 0:1], x_others], dim=1)
@@ -308,7 +263,7 @@ class Block(nn.Module):
         if get_idx and index is not None:
             return x, n_tokens, idx
         return x, n_tokens, None
-
+    
         
 
 class PatchEmbed(nn.Module):
@@ -527,62 +482,45 @@ class TransReID(nn.Module):
         x = self.patch_embed(x)
         B, N, C = x.shape
 
-        cls_tokens = self.cls_token.expand(B, -1, -1)  # stole cls_tokens impl from Phil Wang, thanks
+        # Processing cls_tokens and position embeddings
+        cls_tokens = self.cls_token.expand(B, -1, -1)
         x = torch.cat((cls_tokens, x), dim=1)
-
+        pos_embed = self.pos_embed
         if self.cam_num > 0 and self.view_num > 0:
-            x = x + self.pos_embed + self.sie_xishu * self.sie_embed[camera_id * self.view_num + view_id]
+            camera_view_embed = self.sie_embed[camera_id * self.view_num + view_id]
         elif self.cam_num > 0:
-            x = x + self.pos_embed + self.sie_xishu * self.sie_embed[camera_id]
+            camera_view_embed = self.sie_embed[camera_id]
         elif self.view_num > 0:
-            x = x + self.pos_embed + self.sie_xishu * self.sie_embed[view_id]
+            camera_view_embed = self.sie_embed[view_id]
         else:
-            x = x + self.pos_embed
+            camera_view_embed = 0
+        x = x + pos_embed + self.sie_xishu * camera_view_embed
 
         x = self.pos_drop(x)
-        
-        # make keep_rate, get_idx, tokens
-        keep_rate = [1] * 12
-        if self.training:
-            base_keep_rate = 1.0
-        else:
-            base_keep_rate = base_keep_rate
-        drop_loc=(3, 6, 9)
-        for loc in drop_loc:
-            keep_rate[loc] = base_keep_rate
-        get_idx = True
-        tokens = None
-        # print(base_keep_rate)
-        
-        if not isinstance(keep_rate, (tuple, list)):
-            keep_rate = (keep_rate, ) * self.depth
-        if not isinstance(tokens, (tuple, list)):
-            tokens = (tokens, ) * self.depth
-        assert len(keep_rate) == self.depth
-        assert len(tokens) == self.depth
-        
-        left_tokens = []
-        idxs = []
-                
-        if self.local_feature: # cfg.MODEL.JPM        
-            for i, blk in enumerate(self.blocks[:-1]):
-                x, left_token, idx = blk(x, keep_rate[i], tokens[i], get_idx)
-                left_tokens.append(left_token)
-                if idx is not None:
-                    idxs.append(idx)
 
-            return x, idxs
-                    
-        else:
-            for i, blk in enumerate(self.blocks):
-                x, left_token, idx = blk(x, keep_rate[i], tokens[i], get_idx)
-                left_tokens.append(left_token)
-                if idx is not None:
-                    idxs.append(idx)
+        # Setting keep_rate
+        keep_rate = [1.0] * self.depth
+        drop_loc = (3, 6, 9)
+        if not self.training:
+            for loc in drop_loc:
+                keep_rate[loc] = base_keep_rate
+
+        # Processing blocks
+        left_tokens, idxs = [], []
+        blocks = self.blocks[:-1] if self.local_feature else self.blocks
+        for i, blk in enumerate(blocks):
+            x, left_token, idx = blk(x, keep_rate[i], None, True)
+            left_tokens.append(left_token)
+            if idx is not None:
+                idxs.append(idx)
+
+        # Final processing for non-local feature case
+        if not self.local_feature:
             x = self.norm(x)
-            return x[:, 0]
-        
-        
+            x = x[:, 0]
+
+        return (x, idxs) if self.local_feature else x
+    
     def forward(self, x, cam_label=None, view_label=None, base_keep_rate=None):
         x, idxs = self.forward_features(x, cam_label, view_label, base_keep_rate)
         return x, idxs

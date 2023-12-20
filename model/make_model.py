@@ -7,141 +7,107 @@ from loss.metric_learning import Arcface, Cosface, AMSoftmax, CircleLoss
 from utils.emd import emd_similarity
 from torch.nn.functional import normalize
 
-def shuffle_unit(features, shift, group, begin=1):
-    batchsize = features.size(0)
-    dim = features.size(-1)
-    # Shift Operation
-    feature_random = torch.cat([features[:, begin-1+shift:], features[:, begin:begin-1+shift]], dim=1)
-    x = feature_random
-    # Patch Shuffle Operation
-    try:
-        x = x.view(batchsize, group, -1, dim) # [bs, 2, N/2, C]
-    except:
-        x = torch.cat([x, x[:, -2:-1, :]], dim=1)
-        x = x.view(batchsize, group, -1, dim)
 
-    x = torch.transpose(x, 1, 2).contiguous()
-    x = x.view(batchsize, -1, dim)
-
-    return x
-
-
-def patch_reconstruction(query_cls, query_patch, local_label, gallery_memory_cls, gallery_memory_patch, gallery_label, imgpath, gallery_imgpath, top_k=5):
-    bs = query_cls.shape[0]
-    rec_patch = []
-    rec_cls = []
+def patch_reconstruction(query_cls, query_patch, gallery_memory_cls, gallery_memory_patch, top_k=10):
+    """
+    Reconstructs patch and class features for query samples based on their nearest neighbors in the gallery.
     
-    for b in range(bs):                 
-        ''' ##################################  1. use groudtruth label (up-bound of model) ################################## '''
-        # serach_label = local_label[b]
-        # neighbors_index = (gallery_label == serach_label).nonzero(as_tuple=True)[0]
-        # random_index = torch.randperm(neighbors_index.size(0))
-        # neighbors_index = neighbors_index[random_index]
+    Args:
+    query_cls (Tensor): Query class features.
+    query_patch (Tensor): Query patch features.
+    gallery_memory_cls (Tensor): Class features of gallery samples.
+    gallery_memory_patch (Tensor): Patch features of gallery samples.
+    top_k (int): Number of nearest neighbors to consider.
 
-        ''' ##################################  2. find k nearest neighbors  ##################################  '''
-        # neighbors_index = []
-        # global_neighbors_index = find_k_neighbors(query_cls[b], torch.squeeze(gallery_memory_cls), top_k)
-        # neighbors_index = global_neighbors_index
-        
-        # cls_token dist
-        # neighbors_index = find_k_neighbors(query_cls[b], torch.squeeze(gallery_memory_cls), 10, metric='cls_token')     
-        
-        #  Earth Mover's Distance (EMD)
-        cls_neighbors_index = find_k_neighbors(query_cls[b], torch.squeeze(gallery_memory_cls), 100, imgpath=imgpath[b], metric='cls_token')    
-        serach_patch = torch.transpose(query_patch[b], 0, 1) # [N, C] -> [C, N]
-        gallery_patch = torch.transpose(gallery_memory_patch[cls_neighbors_index], 1, 2) # [100, N, C] -> [100, C, N]        
-        emd_neighbors_index = find_k_neighbors(query_cls[b], torch.squeeze(gallery_memory_cls), 10, serach_patch, gallery_patch, 'both', 0.6, cls_neighbors_index, imgpath=imgpath[b])
+    Returns:
+    Tuple[Tensor, Tensor]: Reconstructed patch and class features for the query samples.
+    """
+
+    batch_size = query_cls.shape[0]
+    reconstructed_patch = []
+    reconstructed_cls = []
+    
+    for b in range(batch_size):
+        # Using Earth Mover's Distance (EMD) to find nearest neighbors
+        cls_neighbors_index = find_k_neighbors(query_cls[b], torch.squeeze(gallery_memory_cls), 100, metric='cls_token')    
+        transposed_query_patch = torch.transpose(query_patch[b], 0, 1)  # Transpose the query patch
+        transposed_gallery_patch = torch.transpose(gallery_memory_patch[cls_neighbors_index], 1, 2)  # Transpose the gallery patch
+        emd_neighbors_index = find_k_neighbors(query_cls[b], torch.squeeze(gallery_memory_cls), top_k, transposed_query_patch, 
+                                               transposed_gallery_patch, 'both', 0.6, cls_neighbors_index)
         neighbors_index = cls_neighbors_index[emd_neighbors_index]
 
-        ''' ##################################  final neighbors_index, then searching xxx neighbors ################################## '''
-        # bs patch -> list
-        neighbors_feat = gallery_memory_patch[neighbors_index] # [top_K, N_s, C]
-        # neighbors_feat = torch.cat([torch.unsqueeze(query_patch[b], 0), neighbors_feat], dim=0) # cat query patch -> [top_K+1, N_s, C] 
-        rec_patch.append(torch.unsqueeze(neighbors_feat, dim=0)) # list: bs* [1, top_k, N_s, C]
+        # Getting the patch features of the neighbors
+        neighbors_feature = gallery_memory_patch[neighbors_index]
+        reconstructed_patch.append(torch.unsqueeze(neighbors_feature, dim=0))
 
-        # avg cls -> list
-        neighbors_cls = gallery_memory_cls[neighbors_index] # [top_K, 1, C]
-        neighbors_cls = torch.squeeze(neighbors_cls, 1) # [top_K, C]  # When dim is given, a squeeze operation is done only in the given dimension
-        # neighbors_cls = torch.cat([torch.unsqueeze(query_cls[b], 0), neighbors_cls], dim=0) # cat query cls -> [top_K+1 ,C] 
-        neighbors_cls = torch.mean(neighbors_cls, dim=0) # [C]
-        rec_cls.append(torch.unsqueeze(neighbors_cls, dim=0)) # list: bs * [1, C]
-                                
-    # cat patch
-    rec_patch = torch.cat(rec_patch, dim=0) # [bs, top_k, N_s, C]
-    bs, _, _, C = rec_patch.shape
-    rec_patch = torch.reshape(rec_patch, (bs, -1, C)) # [bs, top-K, N_s, C] -> [bs, top-K*N_s, C]
+        # Calculating the average class feature of the neighbors
+        neighbors_class = torch.squeeze(gallery_memory_cls[neighbors_index], 1)
+        mean_neighbors_class = torch.mean(neighbors_class, dim=0)
+        reconstructed_cls.append(torch.unsqueeze(mean_neighbors_class, dim=0))
     
-    # cat avg-cls
-    rec_cls = torch.cat(rec_cls, dim=0) # [bs, C]
-    rec_cls = torch.unsqueeze(rec_cls, dim=1) # [bs, 1, C]
+    # Here we input tokens of gallery neighbors for model inference.
+    # Concatenating patch features
+    reconstructed_patch = torch.cat(reconstructed_patch, dim=0)
+    batch_size, _, _, C = reconstructed_patch.shape
+    reconstructed_patch = torch.reshape(reconstructed_patch, (batch_size, -1, C))
+    
+    # Concatenating class features
+    reconstructed_cls = torch.cat(reconstructed_cls, dim=0)
+    reconstructed_cls = torch.unsqueeze(reconstructed_cls, dim=1)
             
-    return rec_patch, rec_cls
+    return reconstructed_patch, reconstructed_cls
 
 
-def find_k_neighbors(serach_feat, gallery_feat, top_k, serach_patch=None, gallery_patch=None, metric=None, alpha=0.5, cls_neighbors_index=None, imgpath=None):
-    # paras: 
-    # serach_feat: [C], gallery_feat: [gallery_Num, C]
-    # serach_local_feat: [K_part, C], gallery_local_feat: [gallery_Num, K_part, C]
-    # serach_patch: [C, N], gallery_patch: [B, C, N]
-    
-    # serach_feat = torch.unsqueeze(serach_feat, dim=0) # serach_feat: [1, C]
-    serach_feat = normalize(serach_feat, dim=0)
+def find_k_neighbors(search_feat, gallery_feat, top_k, search_patch=None, gallery_patch=None, metric=None, alpha=0.5, cls_neighbors_index=None):
+    """
+    Find k nearest neighbors in the gallery for a given search feature.
+
+    Args:
+    search_feat (Tensor): Feature vector of the search sample [C].
+    gallery_feat (Tensor): Feature matrix of the gallery samples [gallery_Num, C].
+    top_k (int): Number of nearest neighbors to find.
+    search_patch (Tensor, optional): Patch feature of the search sample [C, N].
+    gallery_patch (Tensor, optional): Patch feature matrix of the gallery samples [B, C, N].
+    metric (str, optional): The metric used for finding neighbors ('cls_token', 'patch_emd', 'both', 'Chamfer_Distance').
+    alpha (float, optional): Weighting factor for combining different metrics.
+    cls_neighbors_index (Tensor, optional): Preselected neighbor indices for some metrics.
+
+    Returns:
+    Tensor: Indices of the k nearest neighbors.
+    """
+
+    # Normalize the search and gallery features
+    search_feat = normalize(search_feat, dim=0)
     gallery_feat = normalize(gallery_feat, dim=1)
-    
-    if metric == 'cls_token': 
-        dist, _, _, _ = emd_similarity(None, serach_feat, None, gallery_feat, 0)  # cos-dist, 等价于l2-norm
+
+    # Calculate distance based on the specified metric
+    if metric == 'cls_token':
+        # Cosine distance, equivalent to l2-norm
+        dist, _, _, _ = emd_similarity(None, search_feat, None, gallery_feat, 0)
         knn = dist.topk(top_k, largest=True)
 
-    elif metric == 'patch_emd': 
-        serach_patch = normalize(serach_patch, dim=0)
+    elif metric == 'patch_emd':
+        # Normalize patch features
+        search_patch = normalize(search_patch, dim=0)
         gallery_patch = normalize(gallery_patch, dim=1)
-        dist, _, _, _ = emd_similarity(serach_patch, serach_feat, gallery_patch, gallery_feat, 1, 'sc')
+        dist, _, _, _ = emd_similarity(search_patch, search_feat, gallery_patch, gallery_feat, 1, 'sc')
         knn = dist.topk(top_k, largest=True)
 
     elif metric == 'both':
-        serach_patch = normalize(serach_patch, dim=0)
+        # Combine cls_token and patch_emd metrics
+        search_patch = normalize(search_patch, dim=0)
         gallery_patch = normalize(gallery_patch, dim=1)
-        dist_emd, flows, _, _ = emd_similarity(serach_patch, serach_feat, gallery_patch, gallery_feat[cls_neighbors_index], 1, 'apc')
-        dist_cls, _, _, _ = emd_similarity(None, serach_feat, None, gallery_feat[cls_neighbors_index], 0)  # 这里算cls-token的cos-dist
+        dist_emd, flows, _, _ = emd_similarity(search_patch, search_feat, gallery_patch, gallery_feat[cls_neighbors_index], 1, 'apc')
+        dist_cls, _, _, _ = emd_similarity(None, search_feat, None, gallery_feat[cls_neighbors_index], 0)
         dist = alpha * dist_cls + (1.0 - alpha) * dist_emd
         knn = dist.topk(top_k, largest=True)
-        
-    elif metric == 'Chamfer_Distance':
-        dist_cls, _, _, _ = emd_similarity(None, serach_feat, None, gallery_feat[cls_neighbors_index], 0)  # 这里算cls-token的cos-dist
-        dist_cd = Chamfer_Distance(serach_patch, gallery_patch)
-        # print('###### Chamfer_Distance done ######')
-        dist = alpha * dist_cls + (1.0 - alpha) * dist_cd
-        knn = dist.topk(top_k, largest=False)
-        
-        knn.indices
 
     else:
-        assert metric
-        
+        raise ValueError("Invalid metric specified")
+
     return knn.indices
 
 
-def Chamfer_Distance(serach_patch, gallery_patch):
-    # serach_patch: [N, C], gallery_patch: [K, N, C]    
-    g_dist = []
-    for g_k in gallery_patch:
-        
-        q_dist = []
-        for q_i in serach_patch:
-            dist = torch.norm(q_i-g_k, dim=1, p=2)  # l2-norm
-            dist_min = torch.min(dist)
-            dist_min = torch.tensor([dist_min]).to(dist_min.device)
-            q_dist.append(dist_min)
-        cat_q = torch.cat(q_dist, dim=0)
-        g_k_dist = torch.sum(cat_q)
-        g_k_dist = torch.tensor([g_k_dist]).to(g_k_dist.device)
-        g_dist.append(g_k_dist)
-        
-    g_dist = torch.cat(g_dist)
-
-    return g_dist
-
-        
 def weights_init_kaiming(m):
     classname = m.__class__.__name__
     if classname.find('Linear') != -1:
@@ -352,11 +318,11 @@ class build_transformer_local(nn.Module):
         else:
             view_num = 0
 
-        self.base = factory[cfg.MODEL.TRANSFORMER_TYPE](img_size=cfg.INPUT.SIZE_TRAIN, sie_xishu=cfg.MODEL.SIE_COE, local_feature=cfg.MODEL.JPM, camera=camera_num, view=view_num, stride_size=cfg.MODEL.STRIDE_SIZE, drop_path_rate=cfg.MODEL.DROP_PATH)
+        self.base = factory[cfg.MODEL.TRANSFORMER_TYPE](img_size=cfg.INPUT.SIZE_TRAIN, sie_xishu=cfg.MODEL.SIE_COE, local_feature=cfg.MODEL.REC, camera=camera_num, view=view_num, stride_size=cfg.MODEL.STRIDE_SIZE, drop_path_rate=cfg.MODEL.DROP_PATH)
 
-        if pretrain_choice == 'imagenet':
-            self.base.load_param(model_path)
-            print('Loading pretrained ImageNet model......from {}'.format(model_path))
+        # if pretrain_choice == 'imagenet':
+        #     self.base.load_param(model_path)
+        #     print('Loading pretrained ImageNet model......from {}'.format(model_path))
 
         block = self.base.blocks[-1]
         layer_norm = self.base.norm
@@ -414,70 +380,78 @@ class build_transformer_local(nn.Module):
         self.divide_length = cfg.MODEL.DEVIDE_LENGTH
         print('using divide_length size:{}'.format(self.divide_length))
         self.rearrange = rearrange
-
+            
     def forward(self, x, label=None, cam_label=None, view_label=None, get_memory=False,
                 memory_global_cls=None, memory_local_cls=None, gallery_memory_patch=None, 
-                gallery_label=None, reconstruction=False, imgpath=None, keep_rate=None, gallery_imgpath=None):
+                reconstruction=False, imgpath=None, keep_rate=None):
+        """
+        Forward pass of the model.
 
-        # features = self.base(x, cam_label=cam_label, view_label=view_label)
+        Args:
+        x (Tensor): Input tensor.
+        label (Tensor, optional): Labels of the input samples.
+        cam_label (Tensor, optional): Camera labels.
+        view_label (Tensor, optional): View labels.
+        get_memory (bool, optional): Flag to get memory features.
+        memory_global_cls (Tensor, optional): Global class memory.
+        memory_local_cls (Tensor, optional): Local class memory.
+        gallery_memory_patch (Tensor, optional): Memory patch of gallery samples.
+        reconstruction (bool, optional): Flag to enable reconstruction.
+        imgpath (str, optional): Path of the image.
+        keep_rate (float, optional): Keep rate for dropout.
+
+        Returns:
+        Tensor: Output features or logits of the model.
+        """
+
+        # Extract base features and indices
         features, idxs = self.base(x, cam_label=cam_label, view_label=view_label, base_keep_rate=keep_rate)
 
-        # global branch
-        b1_feat = self.b1(features) # [64, N, 768]
+        b1_feat = self.b1(features)  # Shape: [64, N, 768]
         global_feat = b1_feat[:, 0]
-
-        # JPM branch/local branch
-        feature_length = features.size(1) - 1
-        patch_length = feature_length // self.divide_length
         token = features[:, 0:1]
-
-        x = features[:, 1:]
-                     
+        # Bottleneck features
         feat = self.bottleneck(global_feat)
-        
 
-        ''' #################### get gallery memory ######################### '''
+        # Get gallery memory
         if get_memory:
             global_cls = torch.squeeze(token)
-            return features[:, 0:1], features[:, 1:], label, None
+            return features[:, 0:1], features[:, 1:]
 
-        ''' #################### reconstruction occluded patch features ######################### '''
+        # Reconstruction of occluded patch features
         if reconstruction:
-            top_k = 5
-            rec_patch, rec_cls = patch_reconstruction(features[:, 0], features[:, 1:], label, memory_global_cls, 
-                                                      gallery_memory_patch, gallery_label, imgpath, top_k, gallery_imgpath)
-            
+            rec_patch, rec_cls = patch_reconstruction(features[:, 0], features[:, 1:], memory_global_cls, gallery_memory_patch)
+
+            # Reconstruct features
             rec_feat = self.rec_b(torch.cat((rec_cls, rec_patch), dim=1))
             rec_feat = rec_feat[:, 0]
             rec_feat_bn = self.rec_bottleneck(rec_feat)
 
-            
+        # Training branch
         if self.training:
             if self.ID_LOSS_TYPE in ('arcface', 'cosface', 'amsoftmax', 'circle'):
                 cls_score = self.classifier(feat, label)
             else:
-                # return None, None, occ_feat, occ_label # to-do changed
-
                 cls_score = self.classifier(feat)
+                
                 if reconstruction:
                     cls_score_rec = self.rec_classifier(rec_feat_bn)
-                return cls_score, global_feat, None, None 
+                    return cls_score_rec, rec_feat, None, None
+                
+                return cls_score, global_feat, None, None
             
+        # Inference branch
         else:
             if self.neck_feat == 'after':
-                # return feat # global feat
-            
                 if reconstruction:
-                    return rec_feat_bn, idxs # rec feat
+                    return rec_feat_bn, idxs  # Reconstructed feature
                 else:
                     return feat, idxs
-            
-            else: # not pass 
+            else:
                 if reconstruction:
-                    return rec_feat_bn, idxs # rec feat
+                    return rec_feat_bn, idxs  # Reconstructed feature
                 else:
                     return feat, idxs
-            
             
             
     def load_param(self, trained_path):
@@ -502,9 +476,9 @@ __factory_T_type = {
 
 def make_model(cfg, num_class, camera_num, view_num):
     if cfg.MODEL.NAME == 'transformer':
-        if cfg.MODEL.JPM:
+        if cfg.MODEL.REC:
             model = build_transformer_local(num_class, camera_num, view_num, cfg, __factory_T_type, rearrange=cfg.MODEL.RE_ARRANGE)
-            print('===========building transformer with JPM module ===========')
+            print('===========building transformer with REC module ===========')
         else:
             model = build_transformer(num_class, camera_num, view_num, cfg, __factory_T_type)
             print('===========building transformer===========')

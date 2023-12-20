@@ -98,18 +98,7 @@ class OCC_DukeMTMCreID(BaseImageDataset):
             pid_container.add(pid)
         pid2label = {pid: label for label, pid in enumerate(pid_container)}
 
-        ''' # method 1: load label dict from json file 
-        dir_type = dir_path.split('/')[-1]
-        base_dir = '/root/autodl-tmp/TransReID-reconstruction+occ_label/alphapose/ours_occ_label_json'
-        json_file = osp.join(base_dir, dir_type+'.json')
-        if os.path.exists(json_file):
-            print('####### use keypoints of ' + dir_type + ' ######')
-            with open(json_file, 'r') as f:
-                label_dict = json.load(f)
-        else:
-            assert os.path.exists(json_file), 'json_file path not exist'
-        '''
-        
+
         dataset = []
         cam_container = set()
         for img_path in img_paths:
@@ -118,23 +107,7 @@ class OCC_DukeMTMCreID(BaseImageDataset):
             camid -= 1  # index starts from 0
             if relabel: pid = pid2label[pid]
             
-            # # method 1: load label dict from json file 
-            # if os.path.exists(json_file):
-            #     img_name = img_path.split('/')[-1].split('.')[0] # 
-            #     occ_label = label_dict[img_name] 
-            #     dataset.append((img_path, self.pid_begin + pid, camid, 1, occ_label))
-            # else:
-            #     occ_label = np.ones(4)
-            #     dataset.append((img_path, self.pid_begin + pid, camid, 1, occ_label)) # 仿真的occ label,即全部parts都为不遮挡
-            
-            # method 2: data augumentation
-            if '_occ_' not in img_path: # 如果是原来的图片，默认为全部不遮挡
-                occ_label = np.ones(4)
-            else:
-                occ_label = img_path.split('_occ_')[-1].split('_f')[0].split('_') # eg: ['0', '1', '1', '1']
-                occ_label = [int(i) for i in occ_label] # eg: [0, 1, 1, 1]
-                occ_label = np.array(occ_label)
-            dataset.append((img_path, self.pid_begin + pid, camid, 1, occ_label))
+            dataset.append((img_path, self.pid_begin + pid, camid, 1))
 
             cam_container.add(camid)
         print(cam_container, 'cam_container')

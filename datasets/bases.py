@@ -31,7 +31,7 @@ class BaseDataset(object):
     def get_imagedata_info(self, data):
         pids, cams, tracks = [], [], []
 
-        for _, pid, camid, trackid, _ in data:
+        for _, pid, camid, trackid in data:
             pids += [pid]
             cams += [camid]
             tracks += [trackid]
@@ -67,30 +67,20 @@ class BaseImageDataset(BaseDataset):
         print("  gallery  | {:5d} | {:8d} | {:9d}".format(num_gallery_pids, num_gallery_imgs, num_gallery_cams))
         print("  ----------------------------------------")
 
-
+        
 class ImageDataset(Dataset):
-    def __init__(self, dataset, transform=None, add_occ_label=False):
+    def __init__(self, dataset, transform=None):
         self.dataset = dataset
         self.transform = transform
-        self.add_occ_label = add_occ_label
 
     def __len__(self):
         return len(self.dataset)
 
     def __getitem__(self, index):
-        if self.add_occ_label:
-            img_path, pid, camid, trackid, occ_label = self.dataset[index]
-        else:
-            img_path, pid, camid, trackid = self.dataset[index]
+        img_path, pid, camid, trackid = self.dataset[index]
         img = read_image(img_path)
 
         if self.transform is not None:
             img = self.transform(img)
 
-        if self.add_occ_label:
-            occ_label = torch.tensor(occ_label, dtype=torch.int64)
-            occ_label = occ_label.type_as(img).to(img.device)
-
-            return img, pid, camid, trackid,img_path.split('/')[-1], occ_label
-        else:
-            return img, pid, camid, trackid,img_path.split('/')[-1]
+        return img, pid, camid, trackid, img_path.split('/')[-1]

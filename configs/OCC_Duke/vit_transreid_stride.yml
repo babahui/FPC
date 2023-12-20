@@ -1,6 +1,5 @@
 MODEL:
   PRETRAIN_CHOICE: 'imagenet'
-  PRETRAIN_PATH: './jx_vit_base_p16_224-80ecf9dd.pth'
   METRIC_LOSS_TYPE: 'triplet'
   IF_LABELSMOOTH: 'off'
   IF_WITH_CENTER: 'no'
@@ -11,7 +10,7 @@ MODEL:
   STRIDE_SIZE: [11, 11]
   SIE_CAMERA: True
   SIE_COE: 3.0
-  JPM: True
+  REC: True
   RE_ARRANGE: True
 
 INPUT:
@@ -36,7 +35,7 @@ SOLVER:
   OPTIMIZER_NAME: 'SGD'
   MAX_EPOCHS: 120
   BASE_LR: 0.008
-  IMS_PER_BATCH: 64
+  IMS_PER_BATCH: 4
   WARMUP_METHOD: 'linear'
   LARGE_FC_LR: False
   CHECKPOINT_PERIOD: 10
