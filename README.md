@@ -27,7 +27,7 @@ Download the Occluded or Holistic Person ReID datasets (e.g., Occluded-Duke). Un
 
 #### 3. Prepare Checkpoints
 
-Download Checkpoints from [this link](https://drive.google.com/file/d/1DrgUzoUTpiZLpPrWiQyz2_QeZ5z1GfXj/view?usp=share_link). Save the checkpoint file as `./FPC_Occ_Duke_reconstruction.pth`.
+Download Checkpoints from [this link](https://drive.google.com/file/d/1ZdJEIFkjbM6Ax7koin4g0vyFejDH8wk2/view?usp=sharing). Save the checkpoint file as `./FPC_Occ_Duke_reconstruction.pth`.
 
 #### 4. Evaluate
 
